@@ -1,0 +1,17 @@
+/**:
+  ros__parameters:
+    map_frame: "map"
+    base_frame: "base_link"
+    odom_frame: "odom"
+    laser_frame: "lidar_link"
+    kf_dist_linear: 0.1
+    kf_dist_angular: 0.175
+    publish_odom: ""
+    publish_tf: false
+    publish_pose: false
+    publish_pose_stamped: false
+    publish_pose_with_covariance: false
+    publish_pose_with_covariance_stamped: false
+    use_imu: true
+    use_odom: true
+    use_vel: false
