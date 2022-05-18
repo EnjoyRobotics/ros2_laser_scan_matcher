@@ -39,6 +39,8 @@
 #define LASER_SCAN_MATCHER_LASER_SCAN_MATCHER_H
 
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <tf2_ros/transform_broadcaster.h>
@@ -67,14 +69,26 @@ private:
   // Ros handle
 
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_filter_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscriber_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr vel_subscriber_;
 
   std::shared_ptr<tf2_ros::TransformListener> tf_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tfB_;
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+
   tf2::Transform base_to_laser_;  // static, cached
   tf2::Transform laser_to_base_; 
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pose_publisher_; //###
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_stamped_publisher_; //###
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovariance>::SharedPtr pose_with_covariance_publisher_; //###
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_with_covariance_stamped_publisher_; //###
+
   // Coordinate parameters
+  std::string fixed_frame_;
   std::string map_frame_;
   std::string base_frame_;
   std::string odom_frame_;
@@ -86,9 +100,31 @@ private:
   double kf_dist_linear_sq_;
   double kf_dist_angular_;
 
+  // **** What predictions are available to speed up the ICP?
+  // 1) imu - [theta] from imu yaw angle - /imu topic
+  // 2) odom - [x, y, theta] from wheel odometry - /odom topic
+  // 3) velocity [vx, vy, vtheta], usually from ab-filter - /vel.
+  // If more than one is enabled, priority is imu > odom > velocity
+
+  bool use_imu_;
+  bool use_odom_;
+  bool use_vel_;
+  bool stamped_vel_;
+
+  // State Variables
+
+  boost::mutex mutex_;
+
+  bool received_imu_;
+  bool received_odom_;
+  bool received_vel_;
   bool initialized_;
   bool publish_odom_;
   bool publish_tf_;
+  bool publish_pose_;
+  bool publish_pose_with_covariance_;
+  bool publish_pose_stamped_;
+  bool publish_pose_with_covariance_stamped_;
 
   tf2::Transform f2b_;     // fixed-to-base tf (pose of base frame in fixed frame)
   tf2::Transform prev_f2b_; // previous fixed-to-base tf (for odometry calculation)
@@ -101,9 +137,17 @@ private:
   sm_result output_;
   LDP prev_ldp_scan_;
 
+  sensor_msgs::msg::Imu latest_imu_msg_;
+  sensor_msgs::msg::Imu last_used_imu_msg_;
+  nav_msgs::msg::Odometry latest_odom_msg_;
+  nav_msgs::msg::Odometry last_used_odom_msg_;
+  geometry_msgs::msg::Twist latest_vel_msg_;
+
   // Grid map parameters
   double resolution_;
 
+  std::vector<double> position_covariance_;
+  std::vector<double> orientation_covariance_;
   std::vector<double> a_cos_;
   std::vector<double> a_sin_;
 
@@ -115,8 +159,12 @@ private:
   bool processScan(LDP& curr_ldp_scan, const rclcpp::Time& time);
   void laserScanToLDP(const sensor_msgs::msg::LaserScan::SharedPtr& scan, LDP& ldp);
   void createTfFromXYTheta(double x, double y, double theta, tf2::Transform& t);
-
   bool newKeyframeNeeded(const tf2::Transform& d);
+  void getPrediction(double& pr_ch_x, double& pr_ch_y, double& pr_ch_a, double dt);
+  void imuCallback (const sensor_msgs::msg::Imu::SharedPtr imu_msg);
+  void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_msg);
+  void velCallback (const geometry_msgs::msg::Twist::SharedPtr twist_msg);
+  void velStmpCallback(const geometry_msgs::msg::TwistStamped::SharedPtr twist_msg);
 
   void add_parameter(
     const std::string & name, const rclcpp::ParameterValue & default_value,
