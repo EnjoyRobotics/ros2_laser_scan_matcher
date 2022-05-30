@@ -24,19 +24,16 @@ matcher_params_path = os.path.join(
 )
 
 def generate_launch_description():
-
-    simulation = os.environ.get('SIMULATION')
-    if simulation in [None, '']:
-        simulation = 'False'
-
+    
     return LaunchDescription([
         Node(
             package='ros2_laser_scan_matcher',
             executable='laser_scan_matcher',
-            output="screen",
             name='laser_scan_matcher',
-            namespace="laser_scan_matcher",
+            output="both",
+            emulate_tty=True,
             parameters=[matcher_params_path],
+            namespace="",
         ),
     ])
 
