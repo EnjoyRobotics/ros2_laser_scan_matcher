@@ -59,14 +59,13 @@ void LaserScanMatcher::add_parameter(
     declare_parameter(descriptor.name, default_value, descriptor);
   }
 
-
 LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(false)
 {
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   // Initiate parameters
 
    RCLCPP_INFO(get_logger(), "Creating laser_scan_matcher");
-  add_parameter("publish_odom", rclcpp::ParameterValue(std::string("")),
+  add_parameter("odom_topic", rclcpp::ParameterValue(std::string("")),
     "If publish odometry from laser_scan. Empty if not, otherwise name of the topic");
   add_parameter("publish_tf",   rclcpp::ParameterValue(false),
     " If publish tf odom->base_link");
@@ -103,6 +102,13 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
     " If we use odom");
   add_parameter("use_vel",   rclcpp::ParameterValue(false),
     " If we use vel");
+
+  add_parameter("imu_topic", rclcpp::ParameterValue(std::string("")),
+    "If we want to use imu. Empty if not, otherwise name of the topic");
+  add_parameter("used_odom_topic", rclcpp::ParameterValue(std::string("")),
+    "If we want to use another odom. Empty if not, otherwise name of the topic");
+  add_parameter("vel_topic", rclcpp::ParameterValue(std::string("")),
+    "If we want to use velocity. Empty if not, otherwise name of the topic");
 
   // CSM parameters - comments copied from algos.h (by Andrea Censi)
   add_parameter("max_angular_correction_deg", rclcpp::ParameterValue(45.0),
@@ -213,20 +219,22 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
   laser_frame_ = this->get_parameter("laser_frame").as_string();
   kf_dist_linear_  = this->get_parameter("kf_dist_linear").as_double();
   kf_dist_angular_ = this->get_parameter("kf_dist_angular").as_double();
-  odom_topic_   = this->get_parameter("publish_odom").as_string();
   publish_tf_   = this->get_parameter("publish_tf").as_bool(); 
   publish_pose_   = this->get_parameter("publish_pose").as_bool(); 
   publish_pose_stamped_   = this->get_parameter("publish_pose_stamped").as_bool(); 
   publish_pose_with_covariance_   = this->get_parameter("publish_pose_with_covariance").as_bool(); 
   publish_pose_with_covariance_stamped_   = this->get_parameter("publish_pose_with_covariance_stamped").as_bool(); 
-
-  use_imu_   = this->get_parameter("use_imu").as_bool(); 
-  use_odom_ = this->get_parameter("use_odom").as_bool(); 
-  use_vel_ = this->get_parameter("use_odom").as_bool(); 
-
   position_covariance_ = this->get_parameter("position_covariance").as_double_array();
   orientation_covariance_ = this->get_parameter("orientation_covariance").as_double_array();
 
+  imu_topic_   = this->get_parameter("imu_topic").as_string();
+  used_odom_topic_   = this->get_parameter("used_odom_topic").as_string();
+  vel_topic_   = this->get_parameter("vel_topic").as_string();
+  use_imu_ = (imu_topic_ != "");
+  use_odom_ = (used_odom_topic_ != "");
+  use_vel_ = (vel_topic_ != "");
+
+  odom_topic_   = this->get_parameter("odom_topic").as_string();
   publish_odom_ = (odom_topic_ != "");
   kf_dist_linear_sq_ = kf_dist_linear_ * kf_dist_linear_;
 
@@ -283,7 +291,7 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
   if (use_odom_)
     this->odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>("odom", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::odomCallback, this, std::placeholders::_1));
   if (use_vel_)
-    this->vel_subscriber_ = this->create_subscription<geometry_msgs::msg::TwistStamped>("vel", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::velStmpCallback, this, std::placeholders::_1));
+    this->vel_subscriber_ = this->create_subscription<geometry_msgs::msg::TwistStamped>("cmd_vel", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::velStmpCallback, this, std::placeholders::_1));
 
   // Publishers
   if (publish_pose_)
@@ -302,31 +310,13 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
   if (publish_tf_)
   {
     tfB_ = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
-    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
   }
+    RCLCPP_WARN(get_logger(), "Start Matching...");
 }
 
 LaserScanMatcher::~LaserScanMatcher()
 {
    RCLCPP_INFO(get_logger(), "Destroying laser_scan_matcher");
-}
-
-
-
-void LaserScanMatcher::createCache (const sensor_msgs::msg::LaserScan::SharedPtr& scan_msg)
-{
-  a_cos_.clear();
-  a_sin_.clear();
-
-  for (unsigned int i = 0; i < scan_msg->ranges.size(); ++i)
-  {
-    double angle = scan_msg->angle_min + i * scan_msg->angle_increment;
-    a_cos_.push_back(cos(angle));
-    a_sin_.push_back(sin(angle));
-  }
-
-  input_.min_reading = scan_msg->range_min;
-  input_.max_reading = scan_msg->range_max;
 }
 
 void LaserScanMatcher::imuCallback(const sensor_msgs::msg::Imu::SharedPtr imu_msg)
@@ -362,7 +352,6 @@ void LaserScanMatcher::velStmpCallback(const geometry_msgs::msg::TwistStamped::S
 void LaserScanMatcher::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr scan_msg)
 
 {
-
   if (!initialized_)
   {
     createCache(scan_msg);    // caches the sin and cos of all angles
@@ -373,10 +362,12 @@ void LaserScanMatcher::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr
       RCLCPP_WARN(get_logger(),"Skipping scan");
       return;
     }
+    RCLCPP_WARN(get_logger(),"Continue scan");
 
     laserScanToLDP(scan_msg, prev_ldp_scan_);
     last_icp_time_ = scan_msg->header.stamp;
     initialized_ = true;
+    RCLCPP_WARN(get_logger(),"initialized!");
   }
 
   LDP curr_ldp_scan;
@@ -384,42 +375,8 @@ void LaserScanMatcher::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr
   processScan(curr_ldp_scan, scan_msg->header.stamp);
 }
 
-bool LaserScanMatcher::getBaseToLaserTf (const std::string& frame_id)
-{
-  rclcpp::Time t = now();
-
-  tf2::Stamped<tf2::Transform> base_to_laser_tf;
-  geometry_msgs::msg::TransformStamped laser_pose_msg;
-  try
-  {
-      laser_pose_msg = tf_buffer_->lookupTransform(base_frame_, frame_id, t,rclcpp::Duration(10));
-      base_to_laser_tf.setOrigin(tf2::Vector3(laser_pose_msg.transform.translation.x,\
-                                              laser_pose_msg.transform.translation.y,\
-                                              laser_pose_msg.transform.translation.z));
-      tf2::Quaternion q(laser_pose_msg.transform.rotation.x,\
-                        laser_pose_msg.transform.rotation.y,\
-                        laser_pose_msg.transform.rotation.z,\
-                        laser_pose_msg.transform.rotation.w);
-      base_to_laser_tf.setRotation(q);
- 
-  }
-  catch (tf2::TransformException ex)
-  {
-    RCLCPP_INFO(get_logger(),"Could not get initial transform from base to laser frame, %s", ex.what());
-    return false;
-  }
-
-  base_to_laser_ = base_to_laser_tf;
-  laser_to_base_ = base_to_laser_.inverse();
-
-  return true;
-}
-
-
 bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
 {
-
-
   // CSM is used in the following way:
   // The scans are always in the laser frame
   // The reference scan (prevLDPcan_) has a pose of [0, 0, 0]
@@ -508,120 +465,109 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
     if (publish_pose_)
     {
       // unstamped Pose2D message
-      geometry_msgs::msg::Pose pose_msg;
-      // pose_msg = boost::make_shared<geometry_msgs::msg::Pose>();
-      pose_msg.position.x = f2b_.getOrigin().getX();
-      pose_msg.position.y = f2b_.getOrigin().getY();
-      pose_msg.orientation.z = tf2::getYaw(f2b_.getRotation());
-      pose_publisher_->publish(pose_msg);
+      auto pose_msg = boost::make_shared<geometry_msgs::msg::Pose>();
+
+      pose_msg->position.x = f2b_.getOrigin().getX();
+      pose_msg->position.y = f2b_.getOrigin().getY();
+      pose_msg->orientation.z = tf2::getYaw(f2b_.getRotation());
+      pose_publisher_->publish(*pose_msg);
     }
     if (publish_pose_stamped_)
     {
       // stamped Pose message
-      geometry_msgs::msg::PoseStamped pose_stamped_msg;
-      // pose_stamped_msg = boost::make_shared<geometry_msgs::msg::PoseStamped>();
+      auto pose_stamped_msg = boost::make_shared<geometry_msgs::msg::PoseStamped>();
 
-      pose_stamped_msg.header.stamp    = time;
-      pose_stamped_msg.header.frame_id = map_frame_;
+      pose_stamped_msg->header.stamp    = time;
+      pose_stamped_msg->header.frame_id = odom_frame_;
+      pose_stamped_msg->pose.position.x = f2b_.getOrigin().x();
+      pose_stamped_msg->pose.position.y = f2b_.getOrigin().y();
+      pose_stamped_msg->pose.position.z = f2b_.getOrigin().z();
 
-      // tf2::convert(f2b_, pose_stamped_msg.pose);
-      pose_stamped_msg.pose.position.x = f2b_.getOrigin().getX();
-      pose_stamped_msg.pose.position.y = f2b_.getOrigin().getY();
-      pose_stamped_msg.pose.orientation.z = tf2::getYaw(f2b_.getRotation());
+      pose_stamped_msg->pose.orientation.x = f2b_.getRotation().x();
+      pose_stamped_msg->pose.orientation.y = f2b_.getRotation().y();
+      pose_stamped_msg->pose.orientation.z = f2b_.getRotation().z();
+      pose_stamped_msg->pose.orientation.w = f2b_.getRotation().w();
 
-      pose_stamped_publisher_->publish(pose_stamped_msg);
+      pose_stamped_msg->pose.position.x = f2b_.getOrigin().getX();
+      pose_stamped_msg->pose.position.y = f2b_.getOrigin().getY();
+      pose_stamped_msg->pose.orientation.z = tf2::getYaw(f2b_.getRotation());
+
+      pose_stamped_publisher_->publish(*pose_stamped_msg);
     }
     if (publish_pose_with_covariance_)
     {
       // unstamped PoseWithCovariance message
-      geometry_msgs::msg::PoseWithCovariance pose_with_covariance_msg;
-      // pose_with_covariance_msg = boost::make_shared<geometry_msgs::msg::PoseWithCovariance>();
-      // tf2::convert(f2b_, pose_with_covariance_msg.pose);
+      auto pose_with_covariance_msg = boost::make_shared<geometry_msgs::msg::PoseWithCovariance>();
 
-      pose_with_covariance_msg.pose.position.x = f2b_.getOrigin().getX();
-      pose_with_covariance_msg.pose.position.y = f2b_.getOrigin().getY();
-      pose_with_covariance_msg.pose.orientation.z = tf2::getYaw(f2b_.getRotation());
+      pose_with_covariance_msg->pose.position.x = f2b_.getOrigin().getX();
+      pose_with_covariance_msg->pose.position.y = f2b_.getOrigin().getY();
+      pose_with_covariance_msg->pose.orientation.z = tf2::getYaw(f2b_.getRotation());
 
       if (input_.do_compute_covariance)
       {
-        pose_with_covariance_msg.covariance = boost::assign::list_of
-          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
-          (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
-          (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
+        pose_with_covariance_msg->covariance = boost::assign::list_of
+          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
+          (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
+          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+          (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
       }
       else
       {
-        pose_with_covariance_msg.covariance = boost::assign::list_of
+        pose_with_covariance_msg->covariance = boost::assign::list_of
           (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
           (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
           (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
       }
 
-      pose_with_covariance_publisher_ -> publish(pose_with_covariance_msg);
+      pose_with_covariance_publisher_ -> publish(*pose_with_covariance_msg);
     }
     if (publish_pose_with_covariance_stamped_)
     {
       // stamped Pose message
-      geometry_msgs::msg::PoseWithCovarianceStamped pose_with_covariance_stamped_msg;
-      // pose_with_covariance_stamped_msg = boost::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>();
+      auto pose_with_covariance_stamped_msg = boost::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>();
 
-      pose_with_covariance_stamped_msg.header.stamp    = time;
-      pose_with_covariance_stamped_msg.header.frame_id = map_frame_;
+      pose_with_covariance_stamped_msg->header.stamp    = time;
+      pose_with_covariance_stamped_msg->header.frame_id = odom_frame_;
 
-      // tf2_ros::convert(f2b_, pose_with_covariance_stamped_msg.pose.pose);
-      pose_with_covariance_stamped_msg.pose.pose.position.x = f2b_.getOrigin().getX();
-      pose_with_covariance_stamped_msg.pose.pose.position.y = f2b_.getOrigin().getY();
-      pose_with_covariance_stamped_msg.pose.pose.orientation.z = tf2::getYaw(f2b_.getRotation());
+      pose_with_covariance_stamped_msg->pose.pose.position.x = f2b_.getOrigin().x();
+      pose_with_covariance_stamped_msg->pose.pose.position.y = f2b_.getOrigin().y();
+      pose_with_covariance_stamped_msg->pose.pose.position.z = f2b_.getOrigin().z();
+
+      pose_with_covariance_stamped_msg->pose.pose.orientation.x = f2b_.getRotation().x();
+      pose_with_covariance_stamped_msg->pose.pose.orientation.y = f2b_.getRotation().y();
+      pose_with_covariance_stamped_msg->pose.pose.orientation.z = f2b_.getRotation().z();
+      pose_with_covariance_stamped_msg->pose.pose.orientation.w = f2b_.getRotation().w();
 
       if (input_.do_compute_covariance)
       {
-        pose_with_covariance_stamped_msg.pose.covariance = boost::assign::list_of
-          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
-          (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
-          (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
+        pose_with_covariance_stamped_msg->pose.covariance = boost::assign::list_of
+          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
+          (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
+          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+          (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
       }
       else
       {
-        pose_with_covariance_stamped_msg.pose.covariance = boost::assign::list_of
+        pose_with_covariance_stamped_msg->pose.covariance = boost::assign::list_of
           (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
           (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
           (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
       }
 
-      pose_with_covariance_stamped_publisher_->publish(pose_with_covariance_stamped_msg);
-    }
-
-    if (publish_tf_)
-    {
-      geometry_msgs::msg::TransformStamped transform_msg;
-      transform_msg.transform.translation.x = f2b_.getOrigin().getX();
-      transform_msg.transform.translation.y = f2b_.getOrigin().getY();
-      transform_msg.transform.translation.z = f2b_.getOrigin().getZ();
-      transform_msg.transform.rotation.x = f2b_.getRotation().x();
-      transform_msg.transform.rotation.y = f2b_.getRotation().y();
-      transform_msg.transform.rotation.z = f2b_.getRotation().z();
-      transform_msg.transform.rotation.w = f2b_.getRotation().w();
-
-      transform_msg.header.stamp = time;
-      transform_msg.header.frame_id = map_frame_;
-      transform_msg.child_frame_id = base_frame_;
-
-      tf_broadcaster_ -> sendTransform (transform_msg);
+      pose_with_covariance_stamped_publisher_->publish(*pose_with_covariance_stamped_msg);
+      printf("[MATCHER INFO]: x-y-z : [%f, %f, %f]\n", gsl_matrix_get(output_.cov_x_m, 0, 0)*1000, gsl_matrix_get(output_.cov_x_m, 1, 1)*1000,gsl_matrix_get(output_.cov_x_m, 2, 2)*1000);
     }
   }
-
   else
   {
     corr_ch.setIdentity();
@@ -673,7 +619,7 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
     tf_msg.header.stamp = time;
     tf_msg.header.frame_id = odom_frame_;
     tf_msg.child_frame_id = base_frame_;
-    //tf2::Stamped<tf2::Transform> transform_msg (f2b_, time, map_frame_, base_frame_);
+
     tfB_->sendTransform (tf_msg);
   }
 
@@ -744,6 +690,53 @@ void LaserScanMatcher::laserScanToLDP(const sensor_msgs::msg::LaserScan::SharedP
   ldp->true_pose[2] = 0.0;
 }
 
+void LaserScanMatcher::createCache (const sensor_msgs::msg::LaserScan::SharedPtr& scan_msg)
+{
+  a_cos_.clear();
+  a_sin_.clear();
+
+  for (unsigned int i = 0; i < scan_msg->ranges.size(); ++i)
+  {
+    double angle = scan_msg->angle_min + i * scan_msg->angle_increment;
+    a_cos_.push_back(cos(angle));
+    a_sin_.push_back(sin(angle));
+  }
+
+  input_.min_reading = scan_msg->range_min;
+  input_.max_reading = scan_msg->range_max;
+}
+
+bool LaserScanMatcher::getBaseToLaserTf (const std::string& frame_id)
+{
+  rclcpp::Time t = now();
+
+  tf2::Stamped<tf2::Transform> base_to_laser_tf;
+  geometry_msgs::msg::TransformStamped laser_pose_msg;
+  try
+  {
+      laser_pose_msg = tf_buffer_->lookupTransform(base_frame_, frame_id, t,rclcpp::Duration(10));
+      base_to_laser_tf.setOrigin(tf2::Vector3(laser_pose_msg.transform.translation.x,\
+                                              laser_pose_msg.transform.translation.y,\
+                                              laser_pose_msg.transform.translation.z));
+      tf2::Quaternion q(laser_pose_msg.transform.rotation.x,\
+                        laser_pose_msg.transform.rotation.y,\
+                        laser_pose_msg.transform.rotation.z,\
+                        laser_pose_msg.transform.rotation.w);
+      base_to_laser_tf.setRotation(q);
+ 
+  }
+  catch (tf2::TransformException ex)
+  {
+    RCLCPP_INFO(get_logger(),"Could not get initial transform from base to laser frame, %s", ex.what());
+    return false;
+  }
+
+  base_to_laser_ = base_to_laser_tf;
+  laser_to_base_ = base_to_laser_.inverse();
+
+  return true;
+}
+
 void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y, double& pr_ch_a, double dt)
 {
   boost::mutex::scoped_lock(mutex_);
@@ -795,7 +788,6 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y, double& p
   }
 }
 
-
 void LaserScanMatcher::createTfFromXYTheta(double x, double y, double theta, tf2::Transform& t)
 {
   t.setOrigin(tf2::Vector3(x, y, 0.0));
@@ -803,7 +795,6 @@ void LaserScanMatcher::createTfFromXYTheta(double x, double y, double theta, tf2
   q.setRPY(0.0, 0.0, theta);
   t.setRotation(q);
 }
-
 
 }  // namespace scan_tools
 

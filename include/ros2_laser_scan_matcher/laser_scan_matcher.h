@@ -38,6 +38,7 @@
 #ifndef LASER_SCAN_MATCHER_LASER_SCAN_MATCHER_H
 #define LASER_SCAN_MATCHER_LASER_SCAN_MATCHER_H
 
+#include "rclcpp/rclcpp.hpp"
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
@@ -48,15 +49,15 @@
 #include <tf2_ros/message_filter.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2/utils.h>
-
-#include "rclcpp/rclcpp.hpp"
-
-#include <csm/csm.h>  // csm defines min and max, but Eigen complains
 #include <boost/thread.hpp>
 
+#include <csm/csm.h>  // csm defines min and max, but Eigen complains
+#undef min
+#undef max
 
 namespace scan_tools
 {
+  
 class LaserScanMatcher: public rclcpp::Node
 {
 public:
@@ -82,10 +83,10 @@ private:
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
-  rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pose_publisher_; //###
-  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_stamped_publisher_; //###
-  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovariance>::SharedPtr pose_with_covariance_publisher_; //###
-  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_with_covariance_stamped_publisher_; //###
+  rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pose_publisher_; 
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_stamped_publisher_; 
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovariance>::SharedPtr pose_with_covariance_publisher_; 
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_with_covariance_stamped_publisher_; 
 
   // Coordinate parameters
   std::string fixed_frame_;
@@ -94,6 +95,9 @@ private:
   std::string odom_frame_;
   std::string laser_frame_;
   std::string odom_topic_;
+  std::string imu_topic_;
+  std::string used_odom_topic_;
+  std::string vel_topic_;
 
   // Keyframe parameters
   double kf_dist_linear_;
