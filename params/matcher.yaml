@@ -1,17 +1,29 @@
 /**:
   ros__parameters:
+    # Main frames
     map_frame: "map"
     base_frame: "base_link"
-    odom_frame: "odom"
+
+    # Input laser scan
     laser_frame: "lidar_link"
-    kf_dist_linear: 0.1
-    kf_dist_angular: 0.175
-    publish_odom: ""
-    publish_tf: false
-    publish_pose: false
-    publish_pose_stamped: false
-    publish_pose_with_covariance: false
-    publish_pose_with_covariance_stamped: false
-    use_imu: true
-    use_odom: true
-    use_vel: false
+    laser_scan_topic: "scan"
+
+    # Output odom
+    odom_frame: "odom"
+    odom_topic: "laser_odom" # If publish odometry from laser_scan. Empty "" if not, otherwise name of the topic
+
+    # Calculation options
+    do_compute_covariance: 1 # 1: Compute covariance, 0: Use fixed covariance
+    max_iterations: 10
+
+    # Publishing outputs options
+    publish_tf: true
+    publish_pose: true
+    publish_pose_stamped: true
+    publish_pose_with_covariance: true
+    publish_pose_with_covariance_stamped: true
+
+    # If we want to use imu/odom/vel. Empty "" if not, otherwise name of the topic
+    imu_topic: "" # "imu/data"
+    used_odom_topic: "" #"odom"
+    vel_topic: "" # "cmd_vel"
