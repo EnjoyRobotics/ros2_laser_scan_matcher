@@ -290,8 +290,8 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
     this->imu_subscriber_ = this->create_subscription<sensor_msgs::msg::Imu>("imu/data", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::imuCallback, this, std::placeholders::_1));
   if (use_odom_)
     this->odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>("odom", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::odomCallback, this, std::placeholders::_1));
-  if (use_vel_)
-    this->vel_subscriber_ = this->create_subscription<geometry_msgs::msg::TwistStamped>("cmd_vel", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::velStmpCallback, this, std::placeholders::_1));
+
+  this->vel_subscriber_ = this->create_subscription<geometry_msgs::msg::Twist>("cmd_vel", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::velCallback, this, std::placeholders::_1));
 
   // Publishers
   if (publish_pose_)
@@ -341,10 +341,13 @@ void LaserScanMatcher::odomCallback(const nav_msgs::msg::Odometry::SharedPtr odo
   }
 }
 
-void LaserScanMatcher::velStmpCallback(const geometry_msgs::msg::TwistStamped::SharedPtr twist_msg)
+void LaserScanMatcher::velCallback(const geometry_msgs::msg::Twist::SharedPtr twist_msg)
 {
   boost::mutex::scoped_lock(mutex_);
-  latest_vel_msg_ = twist_msg->twist;
+
+  latest_vel_msg_ = *twist_msg;
+
+  latest_ang_vel = twist_msg->angular.z;
 
   received_vel_ = true;
 }
@@ -505,13 +508,22 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
 
       if (input_.do_compute_covariance)
       {
-        pose_with_covariance_msg->covariance = boost::assign::list_of
-          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
-          (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
-          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
-          (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
+        if (abs(latest_ang_vel) < 0.2)
+          pose_with_covariance_msg->covariance = boost::assign::list_of
+            (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
+            (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
+            (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+            (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+            (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+            (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
+        else
+          pose_with_covariance_msg->covariance = boost::assign::list_of
+            (static_cast<double>(1e+3)) (0)  (0)  (0)  (0)  (0)
+            (0)  (static_cast<double>(1e+3)) (0)  (0)  (0)  (0)
+            (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+            (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+            (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+            (0)  (0)  (0)  (0)  (0)  (static_cast<double>(1e+3));
       }
       else
       {
@@ -545,13 +557,22 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
 
       if (input_.do_compute_covariance)
       {
-        pose_with_covariance_stamped_msg->pose.covariance = boost::assign::list_of
-          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
-          (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
-          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
-          (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
+        if (abs(latest_ang_vel) < 0.2)
+          pose_with_covariance_stamped_msg->pose.covariance = boost::assign::list_of
+            (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
+            (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
+            (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+            (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+            (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+            (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
+        else
+          pose_with_covariance_stamped_msg->pose.covariance = boost::assign::list_of
+            (static_cast<double>(1e+3)) (0)  (0)  (0)  (0)  (0)
+            (0)  (static_cast<double>(1e+3)) (0)  (0)  (0)  (0)
+            (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+            (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+            (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+            (0)  (0)  (0)  (0)  (0)  (static_cast<double>(1e+3));
       }
       else
       {
@@ -565,7 +586,7 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
       }
 
       pose_with_covariance_stamped_publisher_->publish(*pose_with_covariance_stamped_msg);
-      printf("[MATCHER INFO]: x-y-z : [%f, %f, %f]\n", gsl_matrix_get(output_.cov_x_m, 0, 0)*1000, gsl_matrix_get(output_.cov_x_m, 1, 1)*1000,gsl_matrix_get(output_.cov_x_m, 2, 2)*1000);
+      // printf("[MATCHER INFO]: x-y-z : [%f, %f, %f]\n", gsl_matrix_get(output_.cov_x_m, 0, 0)*1000, gsl_matrix_get(output_.cov_x_m, 1, 1)*1000,gsl_matrix_get(output_.cov_x_m, 2, 2)*1000);
     }
   }
   else
@@ -598,6 +619,36 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
     odom_msg.twist.twist.linear.x = pose_difference.getOrigin().getX()/dt;
     odom_msg.twist.twist.linear.y = pose_difference.getOrigin().getY()/dt;
     odom_msg.twist.twist.angular.z = tf2::getYaw(pose_difference.getRotation())/dt;
+
+    if (input_.do_compute_covariance)
+    {
+      if (abs(latest_ang_vel) < 0.2)
+        odom_msg.pose.covariance = boost::assign::list_of
+          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (gsl_matrix_get(output_.cov_x_m, 0, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2))
+          (gsl_matrix_get(output_.cov_x_m, 1, 0))  (gsl_matrix_get(output_.cov_x_m, 1, 1)) (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 1, 2))
+          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+          (gsl_matrix_get(output_.cov_x_m, 2, 0))  (gsl_matrix_get(output_.cov_x_m, 2, 1))  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 2, 2));
+      else
+        odom_msg.pose.covariance = boost::assign::list_of
+          (static_cast<double>(1e+3)) (0)  (0)  (0)  (0)  (0)
+          (0)  (static_cast<double>(1e+3)) (0)  (0)  (0)  (0)
+          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+          (0)  (0)  (0)  (0)  (0)  (static_cast<double>(1e+3));
+    }
+    else
+    {
+      odom_msg.pose.covariance = boost::assign::list_of
+        (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
+        (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
+        (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
+        (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
+        (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
+        (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
+    }
 
     prev_f2b_ = f2b_;
 

@@ -72,7 +72,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_filter_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscriber_;
-  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr vel_subscriber_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vel_subscriber_;
 
   std::shared_ptr<tf2_ros::TransformListener> tf_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tfB_;
@@ -103,6 +103,8 @@ private:
   double kf_dist_linear_;
   double kf_dist_linear_sq_;
   double kf_dist_angular_;
+
+  double latest_ang_vel = 0.0;
 
   // **** What predictions are available to speed up the ICP?
   // 1) imu - [theta] from imu yaw angle - /imu topic
@@ -167,8 +169,7 @@ private:
   void getPrediction(double& pr_ch_x, double& pr_ch_y, double& pr_ch_a, double dt);
   void imuCallback (const sensor_msgs::msg::Imu::SharedPtr imu_msg);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_msg);
-  void velCallback (const geometry_msgs::msg::Twist::SharedPtr twist_msg);
-  void velStmpCallback(const geometry_msgs::msg::TwistStamped::SharedPtr twist_msg);
+  void velCallback(const geometry_msgs::msg::Twist::SharedPtr twist_msg);
 
   void add_parameter(
     const std::string & name, const rclcpp::ParameterValue & default_value,
