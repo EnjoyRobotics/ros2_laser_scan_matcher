@@ -312,6 +312,7 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
     tfB_ = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
   }
     RCLCPP_WARN(get_logger(), "Start Matching...");
+    last_odom_time = now();
 }
 
 LaserScanMatcher::~LaserScanMatcher()
@@ -614,11 +615,27 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
     odom_msg.pose.pose.orientation.z = f2b_.getRotation().z();
     odom_msg.pose.pose.orientation.w = f2b_.getRotation().w();
 
+    robot_pose_(0) = f2b_.getOrigin().x();
+    robot_pose_(1) = f2b_.getOrigin().y();
+    robot_pose_(2) = tf2::getYaw(f2b_.getRotation());
+
+    current_scan_time = now();;
+    double time_inc_sec = (current_scan_time - last_odom_time).seconds();
+    lin_speed = sqrt( (robot_oldpose_(0)-robot_pose_(0))*(robot_oldpose_(0)-robot_pose_(0)) +
+                      (robot_oldpose_(1)-robot_pose_(1))*(robot_oldpose_(1)-robot_pose_(1)) )/time_inc_sec;
+
+    double ang_inc = robot_pose_(2) - robot_oldpose_(2);
+    if (ang_inc > 3.14159)
+      ang_inc -= 2*3.14159;
+    if (ang_inc < -3.14159)
+      ang_inc += 2*3.14159;
+    ang_speed = ang_inc/time_inc_sec;
+
     // Get pose difference in base frame and calculate velocities
     auto pose_difference = prev_f2b_.inverse() * f2b_;
-    odom_msg.twist.twist.linear.x = pose_difference.getOrigin().getX()/dt;
+    odom_msg.twist.twist.linear.x = lin_speed;
     odom_msg.twist.twist.linear.y = pose_difference.getOrigin().getY()/dt;
-    odom_msg.twist.twist.angular.z = tf2::getYaw(pose_difference.getRotation())/dt;
+    odom_msg.twist.twist.angular.z = ang_speed;
 
     if (input_.do_compute_covariance)
     {
@@ -649,6 +666,9 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
         (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
         (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
     }
+
+    robot_oldpose_ = robot_pose_;
+    last_odom_time = current_scan_time;
 
     prev_f2b_ = f2b_;
 

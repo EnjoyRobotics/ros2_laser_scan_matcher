@@ -51,6 +51,7 @@
 #include <tf2/utils.h>
 #include <boost/thread.hpp>
 
+#include <Eigen/Dense>
 #include <csm/csm.h>  // csm defines min and max, but Eigen complains
 #undef min
 #undef max
@@ -98,6 +99,12 @@ private:
   std::string imu_topic_;
   std::string used_odom_topic_;
   std::string vel_topic_;
+
+  Eigen::Matrix3f robot_pose_ = Eigen::Matrix3f::Zero();
+  Eigen::Matrix3f robot_oldpose_ = Eigen::Matrix3f::Zero();
+
+  rclcpp::Time last_odom_time, current_scan_time;
+  double lin_speed, ang_speed;
 
   // Keyframe parameters
   double kf_dist_linear_;
