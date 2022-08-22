@@ -557,16 +557,16 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
       else
       {
         pose_with_covariance_stamped_msg->pose.covariance = boost::assign::list_of
-          (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
-          (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(0)) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(0)) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(0)) (0)
-          (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
+          (0.01) (0)    (0)    (0)     (0)     (0)
+          (0)    (0.01) (0)    (0)     (0)     (0)
+          (0)    (0)    (0.01) (0)     (0)     (0)
+          (0)    (0)    (0)    (0.001) (0)     (0)
+          (0)    (0)    (0)    (0)     (0.001) (0)
+          (0)    (0)    (0)    (0)     (0)     (0.1);
       }
 
       pose_with_covariance_stamped_publisher_->publish(*pose_with_covariance_stamped_msg);
-      printf("[MATCHER INFO]: x-y-z : [%f, %f, %f]\n", gsl_matrix_get(output_.cov_x_m, 0, 0)*1000, gsl_matrix_get(output_.cov_x_m, 1, 1)*1000,gsl_matrix_get(output_.cov_x_m, 2, 2)*1000);
+      RCLCPP_DEBUG(get_logger(), "Pose covatiance diagonal: [%f, %f, %f]\n", gsl_matrix_get(output_.cov_x_m, 0, 0)*1000, gsl_matrix_get(output_.cov_x_m, 1, 1)*1000,gsl_matrix_get(output_.cov_x_m, 2, 2)*1000);
     }
   }
   else
