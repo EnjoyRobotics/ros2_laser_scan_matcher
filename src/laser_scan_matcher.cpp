@@ -600,8 +600,12 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
 
     current_scan_time = now();;
     double time_inc_sec = (current_scan_time - last_odom_time).seconds();
-    lin_speed = sqrt( (robot_oldpose_(0)-robot_pose_(0))*(robot_oldpose_(0)-robot_pose_(0)) +
-                      (robot_oldpose_(1)-robot_pose_(1))*(robot_oldpose_(1)-robot_pose_(1)) )/time_inc_sec;
+    auto pose_difference = prev_f2b_.inverse() * f2b_;
+
+    double curr_dis = sqrt( (robot_oldpose_(0)-robot_pose_(0))*(robot_oldpose_(0)-robot_pose_(0)) +
+                        (robot_oldpose_(1)-robot_pose_(1))*(robot_oldpose_(1)-robot_pose_(1)) );
+
+    lin_speed = pose_difference.getOrigin().getX()>=0 ? curr_dis/time_inc_sec : -curr_dis/time_inc_sec;
 
     double ang_inc = robot_pose_(2) - robot_oldpose_(2);
     while (ang_inc > M_PI)
@@ -611,7 +615,6 @@ bool LaserScanMatcher::processScan(LDP& curr_ldp_scan, const rclcpp::Time& time)
     ang_speed = ang_inc/time_inc_sec;
 
     // Get pose difference in base frame and calculate velocities
-    auto pose_difference = prev_f2b_.inverse() * f2b_;
     odom_msg.twist.twist.linear.x = lin_speed;
     odom_msg.twist.twist.linear.y = pose_difference.getOrigin().getY()/dt;
     odom_msg.twist.twist.angular.z = ang_speed;
