@@ -287,11 +287,11 @@ LaserScanMatcher::LaserScanMatcher() : Node("laser_scan_matcher"), initialized_(
   // Subscribers
   this->scan_filter_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>("scan", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::scanCallback, this, std::placeholders::_1));
   if (use_imu_)
-    this->imu_subscriber_ = this->create_subscription<sensor_msgs::msg::Imu>("imu/data", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::imuCallback, this, std::placeholders::_1));
+    this->imu_subscriber_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic_, rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::imuCallback, this, std::placeholders::_1));
   if (use_odom_)
-    this->odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>("odom", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::odomCallback, this, std::placeholders::_1));
+    this->odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(used_odom_topic_, rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::odomCallback, this, std::placeholders::_1));
   if (use_vel_)
-    this->vel_subscriber_ = this->create_subscription<geometry_msgs::msg::TwistStamped>("cmd_vel", rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::velStmpCallback, this, std::placeholders::_1));
+    this->vel_subscriber_ = this->create_subscription<geometry_msgs::msg::TwistStamped>(vel_topic_, rclcpp::SensorDataQoS(), std::bind(&LaserScanMatcher::velStmpCallback, this, std::placeholders::_1));
 
   // Publishers
   if (publish_pose_)
